@@ -1,4 +1,7 @@
-use mpi::ffi::MPI_Comm;
+/// Rust library example with an exposed C interface.
+use std::mem::MaybeUninit;
+
+use mpi::ffi::{MPI_Comm, MPI_Comm_dup};
 use mpi::topology::{Communicator, UserCommunicator};
 use mpi::traits::*;
 
@@ -9,8 +12,12 @@ pub struct RSLibCtx {
 /// Create a new context, store the communicator and return it. Returns NULL on
 /// failure.
 #[no_mangle]
-pub extern "C" fn rslib_new(comm: MPI_Comm) -> *mut RSLibCtx {
-    if let Some(user_comm) = unsafe { UserCommunicator::from_raw(comm) } {
+pub unsafe extern "C" fn rslib_new(comm: MPI_Comm) -> *mut RSLibCtx {
+    // Duplicate the input communicator
+    let mut mem = MaybeUninit::uninit();
+    MPI_Comm_dup(comm, mem.as_mut_ptr());
+    let lib_comm = mem.assume_init();
+    if let Some(user_comm) = UserCommunicator::from_raw(lib_comm) {
         let ctx = Box::new(RSLibCtx {
             comm: user_comm,
         });
@@ -23,8 +30,8 @@ pub extern "C" fn rslib_new(comm: MPI_Comm) -> *mut RSLibCtx {
 
 /// Do something with MPI.
 #[no_mangle]
-pub extern "C" fn rslib_do_something(ctx: *mut RSLibCtx) {
-    let ctx = unsafe { Box::from_raw(ctx) };
+pub unsafe extern "C" fn rslib_do_something(ctx: *mut RSLibCtx) {
+    let ctx = Box::from_raw(ctx);
     let rank = ctx.comm.rank();
     // Just do a simple MPI_Barrier()
     println!("RUST BARRIER (rank {})", rank);
@@ -37,10 +44,7 @@ pub extern "C" fn rslib_do_something(ctx: *mut RSLibCtx) {
 #[no_mangle]
 pub unsafe extern "C" fn rslib_free(ctx: *mut RSLibCtx) {
     // Put the pointer back into the box
-    let ctx = Box::from_raw(ctx);
-    // Don't free the communicator
-    std::mem::forget(ctx.comm);
-    // The box will now be dropped (and freed)
+    Box::from_raw(ctx);
 }
 
 #[cfg(test)]
